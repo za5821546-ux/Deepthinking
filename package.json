@@ -1,16 +1,24 @@
 {
-  "name": "express-hello-world",
+  "name": "server-render-ping",
   "version": "1.0.0",
-  "description": "Express Hello World on Render",
-  "main": "app.js",
-  "repository": "https://github.com/render-examples/express-hello-world",
-  "author": "Render Developers",
-  "license": "MIT",
-  "private": false,
+  "description": "Small Node.js server with self-ping and Gemini Search Grounding API failover.",
+  "main": "index.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
+  "keywords": [
+    "node",
+    "express",
+    "gemini-api",
+    "self-ping"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "express": "^5.0.0"
+    "@google/genai": "^0.1.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^2.6.1"
   }
 }
