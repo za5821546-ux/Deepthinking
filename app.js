@@ -1,4 +1,5 @@
 const express = require('express');
+const https = require('https'); // Thêm thư viện https tích hợp sẵn của NodeJS
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -49,24 +50,21 @@ app.all('/locate', (req, res) => {
         });
     }
 
-    // Nếu đã có dữ liệu trong RAM, tiến hành so sánh với điểm gần nhất (cuối cùng trong mảng)
     if (coordinatesMemory.length > 0) {
         const lastLocation = coordinatesMemory[coordinatesMemory.length - 1];
         const distance = getDistanceInMeters(lastLocation.lat, lastLocation.lon, lat, lon);
 
-        // Nếu khoảng cách giữa điểm mới và điểm cũ nhỏ hơn 10 mét
         if (distance < 10) {
             console.log(`[Bỏ qua] Điểm mới cách điểm cũ chỉ ${distance.toFixed(2)}m (< 10m). Giữ nguyên vị trí cũ.`);
             return res.status(200).json({
                 success: true,
                 message: `Tọa độ trùng/quá gần vị trí cũ (${distance.toFixed(1)}m < 10m). Đã tự động gộp vào điểm cũ.`,
                 merged: true,
-                data: lastLocation // Trả về thông tin điểm cũ đang được giữ lại
+                data: lastLocation
             });
         }
     }
 
-    // Nếu là điểm đầu tiên hoặc cách điểm cũ >= 10m thì lưu mới bình thường
     const newLocation = {
         lat,
         lon,
@@ -75,7 +73,6 @@ app.all('/locate', (req, res) => {
 
     coordinatesMemory.push(newLocation);
 
-    // Giới hạn RAM tối đa 500 điểm
     if (coordinatesMemory.length > 500) {
         coordinatesMemory.shift();
     }
@@ -90,7 +87,6 @@ app.all('/locate', (req, res) => {
     });
 });
 
-// Endpoint phụ lấy dữ liệu JSON cho bản đồ
 app.get('/api/coordinates', (req, res) => {
     res.json(coordinatesMemory);
 });
@@ -133,7 +129,6 @@ app.get('/map', (req, res) => {
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            // Khởi tạo bản đồ tại Việt Nam lúc ban đầu
             const map = L.map('map').setView([16.047079, 108.206230], 6);
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -141,8 +136,6 @@ app.get('/map', (req, res) => {
             }).addTo(map);
 
             let markerGroup = L.layerGroup().addTo(map);
-
-            // Biến kiểm soát: Chỉ di chuyển bản đồ về điểm mới nhất trong lần đầu tiên load dữ liệu thành công
             let isFirstLoad = true; 
 
             async function updateMap() {
@@ -159,17 +152,15 @@ app.get('/map', (req, res) => {
                         const isLast = index === data.length - 1;
                         
                         const marker = L.marker([coord.lat, coord.lon])
-                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}<br><b>Thời gian cập nhật:</b> \${coord.timestamp}\network\`);
+                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}<br><b>Thời gian cập nhật:</b> \${coord.timestamp}\`);
                         
                         markerGroup.addLayer(marker);
 
-                        // Chỉ tự động di chuyển camera và mở popup điểm cuối trong lần đầu tiên tải trang
                         if (isLast) {
                             if (isFirstLoad) {
                                 marker.openPopup();
-                                // Chuyển góc nhìn đến tọa độ mới nhất và đặt độ zoom là 15 cho cận cảnh
                                 map.setView([coord.lat, coord.lon], 15); 
-                                isFirstLoad = false; // Đánh dấu đã hoàn thành việc căn chỉnh góc nhìn lần đầu
+                                isFirstLoad = false;
                             }
                         }
                     });
@@ -188,9 +179,36 @@ app.get('/map', (req, res) => {
     res.send(html);
 });
 
+// Khởi chạy server
 app.listen(PORT, () => {
     console.log(`============ SERVER RUNNING ============`);
     console.log(`[*] Server chạy tại: http://localhost:${PORT}`);
     console.log(`[*] Bộ lọc tự động gộp các điểm có khoảng cách < 10 mét đã được kích hoạt.`);
     console.log(`========================================`);
+
+    // Kích hoạt tính năng Auto-ping sau khi khởi chạy thành công
+    startSelfPing();
 });
+
+/**
+ * HÀM TỰ ĐỘNG PING CHÍNH MÌNH (CHỈ CHẠY KHI DEPLOY LÊN RENDER)
+ */
+function startSelfPing() {
+    // Chỉ ping khi ứng dụng đã được deploy (có tên miền Render thực tế)
+    // Thay 'https://deepthinking.onrender.com' bằng URL Render chính thức của bạn
+    const APP_URL = 'https://deepthinking.onrender.com';
+
+    if (APP_URL.includes('onrender.com')) {
+        console.log(`[Self-Ping] Đã kích hoạt hệ thống tự gõ cửa giữ server thức.`);
+        
+        setInterval(() => {
+            https.get(APP_URL, (res) => {
+                console.log(`[Self-Ping] Ping thành công lúc ${new Date().toLocaleTimeString()} - Status Code: ${res.statusCode}`);
+            }).on('error', (err) => {
+                console.error(`[Self-Ping] Gặp lỗi khi ping:`, err.message);
+            });
+        }, 10 * 60 * 1000); // 10 phút ping một lần (Cực kỳ an toàn trước mốc giới hạn 15 phút của Render)
+    } else {
+        console.log(`[Self-Ping] Bỏ qua (Chạy ở localhost không cần tự ping).`);
+    }
+}
