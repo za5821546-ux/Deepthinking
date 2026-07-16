@@ -5,6 +5,12 @@ const PORT = process.env.PORT || 3000;
 // Sử dụng middleware để parse JSON và URL-encoded
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Cho phép tất cả các nguồn (CORS) gọi tới API này
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
 
 // RAM Storage
 let coordinatesMemory = [];
