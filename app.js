@@ -1,149 +1,167 @@
-// index.js (Đã cập nhật tính năng Failover API Key)
-
 const express = require('express');
-const fetch = require('node-fetch'); 
-const { GoogleGenAI } = require('@google/genai');
-require('dotenv').config();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-const PING_INTERVAL_MS = 20 * 1000;
 
-// Lấy danh sách key từ biến môi trường và tách thành mảng
-const GEMINI_KEY_LIST = process.env.GEMINI_API_KEYS 
-    ? process.env.GEMINI_API_KEYS.split(',').map(key => key.trim())
-    : [];
-
-let ai = null; // Biến toàn cục để lưu trữ client Gemini hoạt động
-let workingKey = null; // Key đang hoạt động
-
-const model = 'gemini-2.5-flash';
-const selfUrl = `http://localhost:${PORT}`;
-
+// Sử dụng middleware để parse JSON và URL-encoded
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// --- 1. Hàm Khởi tạo và Kiểm tra API Key ---
-async function initializeGeminiClient() {
-    if (GEMINI_KEY_LIST.length === 0) {
-        console.error("Lỗi: GEMINI_API_KEYS không được tìm thấy hoặc danh sách rỗng.");
-        return false;
-    }
+// RAM Storage - Lưu danh sách tọa độ dưới dạng mảng các Object
+// Cấu trúc: { lat: number, lon: number, timestamp: string }
+let coordinatesMemory = [];
 
-    console.log(`Đang kiểm tra ${GEMINI_KEY_LIST.length} API Key...`);
-
-    for (const key of GEMINI_KEY_LIST) {
-        if (!key) continue; // Bỏ qua key rỗng
-        
-        const currentAi = new GoogleGenAI({ apiKey: key });
-
-        try {
-            // Thực hiện một cuộc gọi API đơn giản để kiểm tra key (ví dụ: tạo nội dung)
-            await currentAi.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: 'xin chao' 
-            });
-
-            // Nếu thành công, đây là key đang hoạt động
-            ai = currentAi;
-            workingKey = key;
-            console.log(`✅ Thành công! Đã tìm thấy API Key hoạt động (Key: ${key.substring(0, 4)}...${key.slice(-4)}).`);
-            return true; 
-        } catch (error) {
-            console.warn(`❌ Key thất bại (Key: ${key.substring(0, 4)}...${key.slice(-4)}). Đang thử Key tiếp theo.`);
-        }
-    }
-
-    console.error("💔 Không có API Key Gemini nào hoạt động trong danh sách.");
-    return false; 
-}
-
-
-// --- 2. Endpoint GỌI API GEMINI với Search Grounding ---
-app.get('/api/gemini-search', async (req, res) => {
-    if (!ai) {
-        return res.status(503).json({ 
-            error: 'Dịch vụ Gemini không sẵn sàng.', 
-            note: 'Không có API Key nào hoạt động khi khởi động server.' 
-        });
-    }
-    
-    const prompt = req.query.prompt; 
-
-    if (!prompt) {
-        return res.status(400).json({ error: 'Vui lòng cung cấp tham số "prompt" (câu hỏi) để Gemini trả lời.' });
-    }
-
-    try {
-        console.log(`Đang gọi Gemini (Sử dụng key: ...${workingKey.slice(-4)}) cho prompt: ${prompt}`);
-
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
-            config: {
-                // Kích hoạt Search Grounding
-                tools: [{ googleSearch: {} }] 
-            }
-        });
-
-        const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
-        const searchSources = groundingMetadata?.groundingChunks || [];
-
-        res.status(200).json({ 
-            query: prompt,
-            answer: response.text,
-            sources: searchSources.map(chunk => ({
-                title: chunk.title,
-                uri: chunk.web.uri 
-            })),
-            used_key: workingKey.substring(0, 4) + '...' + workingKey.slice(-4),
-            note: 'Câu trả lời được hỗ trợ bởi Google Search.'
-        });
-        
-    } catch (error) {
-        console.error('Lỗi khi gọi API Gemini:', error.message);
-        // Trong trường hợp key hoạt động bị lỗi sau đó, cần cơ chế kiểm tra lại
-        res.status(500).json({ error: 'Lỗi server khi xử lý API Gemini (có thể Key đã hết hạn hoặc bị giới hạn).', details: error.message });
-    }
-});
-
-
-// --- 3. Endpoint Gốc & Tự Ping (Giữ nguyên) ---
+// 1. ROUTE: '/' - Auto-ping giữ server thức
 app.get('/', (req, res) => {
-    res.send('Server đang chạy. Endpoint API Gemini với Search Grounding là /api/gemini-search?prompt=...');
+    res.status(200).send('Server is alive and kicking!');
 });
 
-function startSelfPing() {
-    const pingUrl = selfUrl + '/'; 
-    
-    setInterval(async () => {
-        try {
-            const response = await fetch(pingUrl);
-            if (response.ok) {
-                console.log(`[Self-Ping] Ping thành công đến ${pingUrl} lúc: ${new Date().toLocaleTimeString()}`);
-            } else {
-                 console.warn(`[Self-Ping] Ping thất bại: HTTP Status ${response.status}`);
-            }
-        } catch (error) {
-            console.error(`[Self-Ping] Lỗi khi thực hiện ping: ${error.message}`);
-        }
-    }, PING_INTERVAL_MS);
-    
-    console.log(`Tính năng tự ping đã khởi động, server sẽ tự ping mỗi ${PING_INTERVAL_MS / 1000} giây.`);
-}
+// 2. ROUTE: '/locate' - Nhận lat, lon và lưu vào RAM
+// Hỗ trợ cả GET (qua query: /locate?lat=21.0285&lon=105.8542) và POST
+app.all('/locate', (req, res) => {
+    const lat = parseFloat(req.query.lat || req.body.lat);
+    const lon = parseFloat(req.query.lon || req.body.lon);
 
-
-// --- Khởi động Server ---
-(async () => {
-    const isClientInitialized = await initializeGeminiClient();
-    
-    if (isClientInitialized) {
-        app.listen(PORT, () => {
-            console.log(`✨ Server đang chạy tại: ${selfUrl}`);
-            startSelfPing(); 
+    if (isNaN(lat) || isNaN(lon)) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Thiếu hoặc sai định dạng tọa độ lat, lon!' 
         });
-    } else {
-        console.warn("Server không thể khởi động endpoint API Gemini vì không tìm thấy key hoạt động.");
-        // Bạn có thể chọn khởi động server với chức năng bị giới hạn, hoặc exit
-        // process.exit(1); 
     }
-})();
+
+    const newLocation = {
+        lat,
+        lon,
+        timestamp: new Date().toLocaleString('vi-VN')
+    };
+
+    // Lưu vào RAM
+    coordinatesMemory.push(newLocation);
+
+    // Giới hạn RAM chỉ lưu tối đa 500 điểm gần nhất để tránh tràn bộ nhớ
+    if (coordinatesMemory.length > 500) {
+        coordinatesMemory.shift();
+    }
+
+    console.log(`[Đã lưu] Lat: ${lat}, Lon: ${lon} vào lúc ${newLocation.timestamp}`);
+    
+    res.status(200).json({ 
+        success: true, 
+        message: 'Lưu tọa độ thành công!', 
+        data: newLocation 
+    });
+});
+
+// Endpoint phụ để phía Frontend Map gọi lấy dữ liệu JSON mới nhất
+app.get('/api/coordinates', (req, res) => {
+    res.json(coordinatesMemory);
+});
+
+// 3. ROUTE: '/map' - Hiển thị bản đồ Leaflet cập nhật liên tục
+app.get('/map', (req, res) => {
+    const html = `
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Bản đồ Tọa độ Realtime</title>
+        
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        
+        <style>
+            body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+            #map { height: 100vh; width: 100vw; }
+            #info-panel {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: white;
+                padding: 10px;
+                border-radius: 5px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                z-index: 1000;
+                max-width: 250px;
+            }
+        </style>
+    </head>
+    <body>
+
+        <div id="info-panel">
+            <h4>Trạng thái Bản đồ</h4>
+            <p>Số điểm đã lưu: <span id="count">0</span></p>
+            <p style="font-size: 11px; color: gray;">Tự động cập nhật mỗi 5 giây...</p>
+        </div>
+
+        <div id="map"></div>
+
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        
+        <script>
+            // Khởi tạo bản đồ, mặc định tâm ở Việt Nam
+            const map = L.map('map').setView([16.047079, 108.206230], 6);
+
+            // Thêm lớp bản đồ OpenStreetMap
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // Layer group để chứa các marker (dễ xóa và vẽ lại khi cập nhật)
+            let markerGroup = L.layerGroup().addTo(map);
+
+            // Hàm fetch dữ liệu từ server và cập nhật lên bản đồ
+            async function updateMap() {
+                try {
+                    const response = await fetch('/api/coordinates');
+                    const data = await response.json();
+                    
+                    // Cập nhật số lượng điểm hiển thị
+                    document.getElementById('count').innerText = data.length;
+
+                    // Xóa các marker cũ
+                    markerGroup.clearLayers();
+
+                    if (data.length === 0) return;
+
+                    // Vẽ marker mới cho tất cả các điểm trong RAM
+                    data.forEach((coord, index) => {
+                        const isLast = index === data.length - 1;
+                        
+                        // Marker điểm cuối cùng sẽ có màu đỏ (hoặc icon đặc biệt), các điểm cũ màu xanh tiêu chuẩn
+                        const marker = L.marker([coord.lat, coord.lon])
+                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}<br><b>Thời gian:</b> \${coord.timestamp}\`);
+                        
+                        markerGroup.addLayer(marker);
+
+                        // Nếu là điểm mới nhất được cập nhật, tự động di chuyển bản đồ tới đó
+                        if (isLast) {
+                            marker.openPopup();
+                            map.setView([coord.lat, coord.lon], map.getZoom()); // Giữ nguyên độ zoom hiện tại
+                        }
+                    });
+
+                } catch (error) {
+                    console.error('Lỗi khi cập nhật bản đồ:', error);
+                }
+            }
+
+            // Gọi cập nhật ngay khi load trang
+            updateMap();
+
+            // Thiết lập cập nhật liên tục mỗi 5 giây (5000ms)
+            setInterval(updateMap, 5000);
+        </script>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+// Khởi chạy server
+app.listen(PORT, () => {
+    console.log(`============ SERVER RUNNING ============`);
+    console.log(`[*] Server chạy tại: http://localhost:${PORT}`);
+    console.log(`[*] Auto-ping:      http://localhost:${PORT}/`);
+    console.log(`[*] Gửi tọa độ:     http://localhost:${PORT}/locate?lat=[vĩ_độ]&lon=[kinh_độ]`);
+    console.log(`[*] Xem bản đồ:     http://localhost:${PORT}/map`);
+    console.log(`========================================`);
+});
