@@ -91,7 +91,7 @@ app.get('/api/coordinates', (req, res) => {
     res.json(coordinatesMemory);
 });
 
-// 3. ROUTE: '/map' - Hiển thị bản đồ Leaflet
+// 3. ROUTE: '/map' - Hiển thị bản đồ Leaflet (Đã bỏ hiển thị thời gian)
 app.get('/map', (req, res) => {
     const html = `
     <!DOCTYPE html>
@@ -151,8 +151,9 @@ app.get('/map', (req, res) => {
                     data.forEach((coord, index) => {
                         const isLast = index === data.length - 1;
                         
+                        // Đã lược bỏ trường Thời gian cập nhật khỏi popup của Marker
                         const marker = L.marker([coord.lat, coord.lon])
-                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}<br><b>Thời gian cập nhật:</b> \${coord.timestamp}\`);
+                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}\`);
                         
                         markerGroup.addLayer(marker);
 
