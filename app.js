@@ -133,6 +133,7 @@ app.get('/map', (req, res) => {
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
+            // Khởi tạo bản đồ tại Việt Nam lúc ban đầu
             const map = L.map('map').setView([16.047079, 108.206230], 6);
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -140,6 +141,9 @@ app.get('/map', (req, res) => {
             }).addTo(map);
 
             let markerGroup = L.layerGroup().addTo(map);
+
+            // Biến kiểm soát: Chỉ di chuyển bản đồ về điểm mới nhất trong lần đầu tiên load dữ liệu thành công
+            let isFirstLoad = true; 
 
             async function updateMap() {
                 try {
@@ -155,13 +159,18 @@ app.get('/map', (req, res) => {
                         const isLast = index === data.length - 1;
                         
                         const marker = L.marker([coord.lat, coord.lon])
-                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}<br><b>Thời gian cập nhật:</b> \${coord.timestamp}\`);
+                            .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}<br><b>Thời gian cập nhật:</b> \${coord.timestamp}\network\`);
                         
                         markerGroup.addLayer(marker);
 
+                        // Chỉ tự động di chuyển camera và mở popup điểm cuối trong lần đầu tiên tải trang
                         if (isLast) {
-                            marker.openPopup();
-                            map.setView([coord.lat, coord.lon], map.getZoom());
+                            if (isFirstLoad) {
+                                marker.openPopup();
+                                // Chuyển góc nhìn đến tọa độ mới nhất và đặt độ zoom là 15 cho cận cảnh
+                                map.setView([coord.lat, coord.lon], 15); 
+                                isFirstLoad = false; // Đánh dấu đã hoàn thành việc căn chỉnh góc nhìn lần đầu
+                            }
                         }
                     });
 
