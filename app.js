@@ -54,11 +54,11 @@ app.all('/locate', (req, res) => {
         const lastLocation = coordinatesMemory[coordinatesMemory.length - 1];
         const distance = getDistanceInMeters(lastLocation.lat, lastLocation.lon, lat, lon);
 
-        if (distance < 10) {
-            console.log(`[Bỏ qua] Điểm mới cách điểm cũ chỉ ${distance.toFixed(2)}m (< 10m). Giữ nguyên vị trí cũ.`);
+        if (distance < 2000) {
+            console.log(`[Bỏ qua] Điểm mới cách điểm cũ chỉ ${distance.toFixed(2)}m (< 2000m). Giữ nguyên vị trí cũ.`);
             return res.status(200).json({
                 success: true,
-                message: `Tọa độ trùng/quá gần vị trí cũ (${distance.toFixed(1)}m < 10m). Đã tự động gộp vào điểm cũ.`,
+                message: `Tọa độ trùng/quá gần vị trí cũ (${distance.toFixed(1)}m < 2000m). Đã tự động gộp vào điểm cũ.`,
                 merged: true,
                 data: lastLocation
             });
@@ -77,7 +77,7 @@ app.all('/locate', (req, res) => {
         coordinatesMemory.shift();
     }
 
-    console.log(`[Đã lưu] Điểm mới cách điểm cũ >= 10m. Lat: ${lat}, Lon: ${lon} lúc ${newLocation.timestamp}`);
+    console.log(`[Đã lưu] Điểm mới cách điểm cũ >= 2000m. Lat: ${lat}, Lon: ${lon} lúc ${newLocation.timestamp}`);
     
     res.status(200).json({ 
         success: true, 
