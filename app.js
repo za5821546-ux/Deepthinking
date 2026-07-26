@@ -1,12 +1,10 @@
 const express = require('express');
-const https = require('https'); // Thêm thư viện https tích hợp sẵn của NodeJS
+const https = require('https');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Sử dụng middleware để parse JSON và URL-encoded
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// Cho phép tất cả các nguồn (CORS) gọi tới API này
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -15,6 +13,9 @@ app.use((req, res, next) => {
 
 // RAM Storage
 let coordinatesMemory = [];
+
+// Cấu hình bán kính lọc (mét)
+const MIN_DISTANCE_METERS = 200;
 
 /**
  * Hàm tính khoảng cách giữa 2 tọa độ GPS bằng công thức Haversine (đơn vị: mét)
@@ -29,8 +30,7 @@ function getDistanceInMeters(lat1, lon1, lat2, lon2) {
               Math.sin(dLon / 2) * Math.sin(dLon / 2);
               
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c; // Khoảng cách tính bằng mét
-    return distance;
+    return R * c; 
 }
 
 // 1. ROUTE: '/' - Auto-ping giữ server thức
@@ -50,21 +50,24 @@ app.all('/locate', (req, res) => {
         });
     }
 
-    if (coordinatesMemory.length > 0) {
-        const lastLocation = coordinatesMemory[coordinatesMemory.length - 1];
-        const distance = getDistanceInMeters(lastLocation.lat, lastLocation.lon, lat, lon);
+    // KIỂM TRA: Tìm xem có điểm nào trong mảng nằm trong bán kính < 200m không
+    const duplicatePoint = coordinatesMemory.find(point => {
+        const dist = getDistanceInMeters(point.lat, point.lon, lat, lon);
+        return dist < MIN_DISTANCE_METERS;
+    });
 
-        if (distance < 2000) {
-            console.log(`[Bỏ qua] Điểm mới cách điểm cũ chỉ ${distance.toFixed(2)}m (< 2000m). Giữ nguyên vị trí cũ.`);
-            return res.status(200).json({
-                success: true,
-                message: `Tọa độ trùng/quá gần vị trí cũ (${distance.toFixed(1)}m < 2000m). Đã tự động gộp vào điểm cũ.`,
-                merged: true,
-                data: lastLocation
-            });
-        }
+    if (duplicatePoint) {
+        const distance = getDistanceInMeters(duplicatePoint.lat, duplicatePoint.lon, lat, lon);
+        console.log(`[Bỏ qua] Tọa độ trùng/quá gần một điểm cũ (${distance.toFixed(2)}m < ${MIN_DISTANCE_METERS}m).`);
+        return res.status(200).json({
+            success: true,
+            message: `Tọa độ quá gần một điểm đã có (${distance.toFixed(1)}m < ${MIN_DISTANCE_METERS}m). Đã tự động bỏ qua.`,
+            merged: true,
+            data: duplicatePoint
+        });
     }
 
+    // Nếu không trùng với bất kỳ điểm nào, thêm điểm mới
     const newLocation = {
         lat,
         lon,
@@ -77,7 +80,7 @@ app.all('/locate', (req, res) => {
         coordinatesMemory.shift();
     }
 
-    console.log(`[Đã lưu] Điểm mới cách điểm cũ >= 2000m. Lat: ${lat}, Lon: ${lon} lúc ${newLocation.timestamp}`);
+    console.log(`[Đã lưu] Điểm mới hợp lệ (cách các điểm cũ >= ${MIN_DISTANCE_METERS}m). Lat: ${lat}, Lon: ${lon} lúc ${newLocation.timestamp}`);
     
     res.status(200).json({ 
         success: true, 
@@ -91,7 +94,7 @@ app.get('/api/coordinates', (req, res) => {
     res.json(coordinatesMemory);
 });
 
-// 3. ROUTE: '/map' - Hiển thị bản đồ Leaflet (Đã bỏ hiển thị thời gian)
+// 3. ROUTE: '/map' - Hiển thị bản đồ Leaflet
 app.get('/map', (req, res) => {
     const html = `
     <!DOCTYPE html>
@@ -122,7 +125,7 @@ app.get('/map', (req, res) => {
         <div id="info-panel">
             <h4>Trạng thái Bản đồ</h4>
             <p>Số điểm thực tế trên map: <span id="count">0</span></p>
-            <p style="font-size: 11px; color: gray;">Tự động lọc các điểm di chuyển dưới 10m và cập nhật mỗi 5 giây...</p>
+            <p style="font-size: 11px; color: gray;">Tự động lọc các điểm trùng dưới 200m và cập nhật mỗi 5 giây...</p>
         </div>
 
         <div id="map"></div>
@@ -151,18 +154,15 @@ app.get('/map', (req, res) => {
                     data.forEach((coord, index) => {
                         const isLast = index === data.length - 1;
                         
-                        // Đã lược bỏ trường Thời gian cập nhật khỏi popup của Marker
                         const marker = L.marker([coord.lat, coord.lon])
                             .bindPopup(\`<b>Điểm số:</b> \${index + 1}<br><b>Lat:</b> \${coord.lat}<br><b>Lon:</b> \${coord.lon}\`);
                         
                         markerGroup.addLayer(marker);
 
-                        if (isLast) {
-                            if (isFirstLoad) {
-                                marker.openPopup();
-                                map.setView([coord.lat, coord.lon], 15); 
-                                isFirstLoad = false;
-                            }
+                        if (isLast && isFirstLoad) {
+                            marker.openPopup();
+                            map.setView([coord.lat, coord.lon], 15); 
+                            isFirstLoad = false;
                         }
                     });
 
@@ -184,19 +184,13 @@ app.get('/map', (req, res) => {
 app.listen(PORT, () => {
     console.log(`============ SERVER RUNNING ============`);
     console.log(`[*] Server chạy tại: http://localhost:${PORT}`);
-    console.log(`[*] Bộ lọc tự động gộp các điểm có khoảng cách < 10 mét đã được kích hoạt.`);
+    console.log(`[*] Bộ lọc tự động gộp các điểm có khoảng cách < ${MIN_DISTANCE_METERS} mét đã được kích hoạt.`);
     console.log(`========================================`);
 
-    // Kích hoạt tính năng Auto-ping sau khi khởi chạy thành công
     startSelfPing();
 });
 
-/**
- * HÀM TỰ ĐỘNG PING CHÍNH MÌNH (CHỈ CHẠY KHI DEPLOY LÊN RENDER)
- */
 function startSelfPing() {
-    // Chỉ ping khi ứng dụng đã được deploy (có tên miền Render thực tế)
-    // Thay 'https://deepthinking.onrender.com' bằng URL Render chính thức của bạn
     const APP_URL = 'https://deepthinking.onrender.com';
 
     if (APP_URL.includes('onrender.com')) {
@@ -208,7 +202,7 @@ function startSelfPing() {
             }).on('error', (err) => {
                 console.error(`[Self-Ping] Gặp lỗi khi ping:`, err.message);
             });
-        }, 10 * 60 * 1000); // 10 phút ping một lần (Cực kỳ an toàn trước mốc giới hạn 15 phút của Render)
+        }, 10 * 60 * 1000);
     } else {
         console.log(`[Self-Ping] Bỏ qua (Chạy ở localhost không cần tự ping).`);
     }
