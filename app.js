@@ -5,9 +5,20 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Middleware thiết lập CORS & Cấu hình hỗ trợ nhúng iframe
 app.use((req, res, next) => {
+    // CORS Header
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    
+    // CẤU HÌNH NHÚNG IFRAME (HTTP & HTTPS)
+    // 1. Loại bỏ X-Frame-Options để cho phép iframe từ domain khác
+    res.removeHeader("X-Frame-Options");
+    
+    // 2. Thiết lập Content-Security-Policy cho phép frame-ancestors từ mọi nguồn
+    res.setHeader("Content-Security-Policy", "frame-ancestors *;");
+    
     next();
 });
 
@@ -35,10 +46,11 @@ function getDistanceInMeters(lat1, lon1, lat2, lon2) {
 
 // 1. ROUTE: '/' - Auto-ping giữ server thức
 app.get('/', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.status(200).send('Server is alive and kicking!');
 });
 
-// ROUTE MỚI: '/app' - Lấy mã HTML/JS từ Gist về và render dựng trang trực tiếp
+// 2. ROUTE: '/app' - Lấy mã HTML/JS từ Gist về và render trực tiếp (Đã fix lỗi iframe trả code/file)
 app.get('/app', (req, res) => {
     const gistUrl = 'https://gist.githubusercontent.com/za5821546-ux/1b3cd9a3dead5347fd88e6dd7a73c4ac/raw/5bd95e9e02b29f1359c47c387e068c4c4893781a/APP.JS';
 
@@ -50,19 +62,21 @@ app.get('/app', (req, res) => {
             htmlData += chunk;
         });
 
-        // Khi tải hoàn tất, gửi trực tiếp về trình duyệt dạng HTML
+        // Khi tải hoàn tất, gửi trực tiếp về trình duyệt dưới dạng HTML chuẩn
         response.on('end', () => {
+            // Ép kiểu MIME thành text/html để trình duyệt render giao diện thay vì tải file
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.send(htmlData);
         });
 
     }).on('error', (err) => {
         console.error('[Fetch App Error] Lỗi khi tải nội dung trang từ Gist:', err.message);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.status(500).send('<h3>Không thể tải giao diện ứng dụng từ Gist!</h3>');
     });
 });
 
-// 2. ROUTE: '/locate' - Nhận lat, lon, kiểm tra khoảng cách và lưu vào RAM
+// 3. ROUTE: '/locate' - Nhận lat, lon, kiểm tra khoảng cách và lưu vào RAM
 app.all('/locate', (req, res) => {
     const lat = parseFloat(req.query.lat || req.body.lat);
     const lon = parseFloat(req.query.lon || req.body.lon);
@@ -114,12 +128,14 @@ app.all('/locate', (req, res) => {
     });
 });
 
+// API Lấy danh sách tọa độ
 app.get('/api/coordinates', (req, res) => {
     res.json(coordinatesMemory);
 });
 
-// 3. ROUTE: '/map' - Hiển thị bản đồ Leaflet
+// 4. ROUTE: '/map' - Hiển thị bản đồ Leaflet
 app.get('/map', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     const html = `
     <!DOCTYPE html>
     <html lang="vi">
