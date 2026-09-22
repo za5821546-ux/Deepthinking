@@ -38,26 +38,27 @@ app.get('/', (req, res) => {
     res.status(200).send('Server is alive and kicking!');
 });
 
-// ROUTE MỚI: '/app' - Tải script từ GitHub Gist và trả về dạng JavaScript
+// ROUTE MỚI: '/app' - Lấy mã HTML/JS từ Gist về và render dựng trang trực tiếp
 app.get('/app', (req, res) => {
-    const scriptUrl = 'https://gist.githubusercontent.com/za5821546-ux/1b3cd9a3dead5347fd88e6dd7a73c4ac/raw/5bd95e9e02b29f1359c47c387e068c4c4893781a/APP.JS';
+    const gistUrl = 'https://gist.githubusercontent.com/za5821546-ux/1b3cd9a3dead5347fd88e6dd7a73c4ac/raw/5bd95e9e02b29f1359c47c387e068c4c4893781a/APP.JS';
 
-    https.get(scriptUrl, (response) => {
-        let data = '';
+    https.get(gistUrl, (response) => {
+        let htmlData = '';
 
+        // Tải từng phần dữ liệu từ URL
         response.on('data', (chunk) => {
-            data += chunk;
+            htmlData += chunk;
         });
 
+        // Khi tải hoàn tất, gửi trực tiếp về trình duyệt dạng HTML
         response.on('end', () => {
-            // Đặt Header để trình duyệt hiểu đây là tập tin JavaScript
-            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-            res.send(data);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.send(htmlData);
         });
 
     }).on('error', (err) => {
-        console.error('[App Script Error] Lỗi khi tải file JS:', err.message);
-        res.status(500).send('console.error("Lỗi khi tải script từ server xa");');
+        console.error('[Fetch App Error] Lỗi khi tải nội dung trang từ Gist:', err.message);
+        res.status(500).send('<h3>Không thể tải giao diện ứng dụng từ Gist!</h3>');
     });
 });
 
