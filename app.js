@@ -52,7 +52,7 @@ app.get('/', (req, res) => {
 
 // 2. ROUTE: '/app' - Lấy mã HTML/JS từ Gist về và render trực tiếp (Đã fix lỗi iframe trả code/file)
 app.get('/app', (req, res) => {
-    const gistUrl = 'https://gist.githubusercontent.com/za5821546-ux/1b3cd9a3dead5347fd88e6dd7a73c4ac/raw/77f3be4a19c65ed4d7603ec42f64bbfbad2bd4f2/APP.JS';
+    const gistUrl = 'https://gist.githubusercontent.com/za5821546-ux/1b3cd9a3dead5347fd88e6dd7a73c4ac/raw/fa6f6ba08013c1086b4580f72c7071ee61ca6bbd/APP.JS';
 
     https.get(gistUrl, (response) => {
         let htmlData = '';
